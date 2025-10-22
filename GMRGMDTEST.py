@@ -2,6 +2,86 @@ import numpy as np
 import webview
 from itertools import combinations, product
 
+"""
+Transmission Line Parameter Calculator Backend
+
+This script provides the backend logic for a transmission line parameter calculator.
+It computes the Geometric Mean Radius (GMR), Geometric Mean Distance (GMD),
+and the fundamental line parameters (Resistance, Inductance, Capacitance) for
+a three-phase transmission line configuration.
+
+The calculations support bundled conductors and various units of measurement.
+
+Core Components:
+- Utility Functions: Handle mathematical operations like distance, geometric mean,
+  GMR, and GMD calculations.
+- GMDGMRApp Class: An object-oriented approach to manage the state of the
+  transmission line, including conductor positions, materials, and other
+  physical properties.
+
+-----------------------------
+Standalone Usage Example
+-----------------------------
+The following example demonstrates how to use the GMDGMRApp class to model a
+simple three-phase transmission line and calculate its parameters.
+
+if __name__ == '__main__':
+    # 1. Initialize the application
+    app = GMDGMRApp()
+
+    # 2. Set the units and line parameters
+    print(app.set_unit("ft"))  # All coordinates and radii will be in feet
+    print(app.set_line_params(material="ACSR", length=150, radius=0.04, freq=60))
+    print("-" * 20)
+
+    # 3. Define the self GMR (r') for the conductors in each phase
+    # This is often given as 0.7788 * radius for a solid cylindrical wire.
+    # For this example, let's use a hypothetical value.
+    conductor_gmr_ft = 0.035
+    print(app.set_gmr("A", conductor_gmr_ft))
+    print(app.set_gmr("B", conductor_gmr_ft))
+    print(app.set_gmr("C", conductor_gmr_ft))
+    print("-" * 20)
+
+    # 4. Add conductor coordinates for each phase (bundle)
+    # Let's model a horizontal configuration with 20 ft spacing.
+    # Phase A at (-20, 0)
+    # Phase B at (0, 0)
+    # Phase C at (20, 0)
+    print("Adding points for Phase A...")
+    app.add_point(x=-20, y=0, bundle="A")
+
+    print("Adding points for Phase B...")
+    app.add_point(x=0, y=0, bundle="B")
+
+    print("Adding points for Phase C...")
+    app.add_point(x=20, y=0, bundle="C")
+    print("-" * 20)
+
+    # 5. Compute and display the results
+    results = app.compute_results()
+
+    print("\\n========== COMPUTATION RESULTS ==========")
+    print("--- GMR Values ---")
+    for gmr_data in results.get("gmr", []):
+        print(f"Phase {gmr_data['label']}: {gmr_data['value']:.6f} meters")
+
+    print("\\n--- GMD Values ---")
+    for gmd_data in results.get("gmd", []):
+        print(f"{gmd_data['pair']}: {gmd_data['value']:.6f} meters")
+
+    print("\\n--- Line Parameters ---")
+    params = results.get("params", {})
+    if params:
+        print(f"Total Resistance (R): {params['R_total']:.4f} Ω")
+        print(f"Total Inductance (L): {params['L_total']:.4f} mH")
+        print(f"Total Capacitance (C): {params['C_total']:.4f} µF")
+        print(f"Inductive Reactance (XL): {params['XL']:.4f} Ω")
+        print(f"Capacitive Reactance (XC): {params['XC']:.4f} Ω")
+    print("========================================")
+
+"""
+
 # ---------- Unit Conversion ----------
 UNIT_CONVERSIONS = {
     "m": 1.0,
@@ -21,27 +101,75 @@ MATERIALS = {
 
 # ---------- Math Utilities ----------
 def distance(p1, p2):
+    """Calculates the Euclidean distance between two points.
+
+    Args:
+        p1 (tuple): A tuple (x, y) representing the first point.
+        p2 (tuple): A tuple (x, y) representing the second point.
+
+    Returns:
+        float: The distance between p1 and p2.
+    """
     return np.linalg.norm(np.array(p1) - np.array(p2))
 
 def geometric_mean(values):
+    """Calculates the geometric mean of a list of numbers.
+
+    Args:
+        values (list of float): A list of numerical values.
+
+    Returns:
+        float: The geometric mean of the values.
+    """
     return np.prod(values) ** (1 / len(values))
 
 def compute_gmr(bundle_points, r_self):
+    """Computes the Geometric Mean Radius (GMR) for a bundled conductor.
+    Also known as self GMD (Ds).
+
+    Args:
+        bundle_points (list of tuples): A list of (x, y) coordinates for each
+                                        conductor within the bundle.
+        r_self (float): The self GMR of a single conductor, often denoted as r'
+                        (r' = 0.7788 * radius for a solid wire). Must be in meters.
+
+    Returns:
+        float: The calculated GMR of the bundle in meters.
+    """
     n = len(bundle_points)
     if n == 1:
         return r_self
+    # Distances between every unique pair of conductors in the bundle
     distances = [distance(p1, p2) for p1, p2 in combinations(bundle_points, 2)]
-    all_terms = [r_self] * n + distances
-    gmr = np.prod(all_terms) ** (1 / n)
+    # The GMR formula involves n^2 terms in the root.
+    # This includes n terms of r_self and n*(n-1) distances between conductors
+    # (with each distance counted twice, D_12 and D_21).
+    # This simplified version uses each unique distance twice.
+    num_terms = n**2
+    all_terms_product = (r_self**n) * (np.prod(distances)**2)
+    gmr = all_terms_product**(1 / num_terms)
     return gmr
 
+
 def compute_gmd(bundle1, bundle2):
+    """Computes the Geometric Mean Distance (GMD) between two conductor bundles.
+    Also known as mutual GMD.
+
+    Args:
+        bundle1 (list of tuples): List of (x, y) coordinates for conductors in the first bundle.
+        bundle2 (list of tuples): List of (x, y) coordinates for conductors in the second bundle.
+
+    Returns:
+        float: The calculated GMD between the two bundles in meters.
+    """
     distances = [distance(p1, p2) for p1, p2 in product(bundle1, bundle2)]
     return geometric_mean(distances)
 
 # ---------- App Logic ----------
 class GMDGMRApp:
+    """Manages the state and calculations for the transmission line calculator."""
     def __init__(self):
+        """Initializes the GMDGMRApp with default values."""
         self.bundles = {"A": [], "B": [], "C": []}
         self.r_self = {"A": 0.01, "B": 0.01, "C": 0.01}
         self.unit = "m"
@@ -55,20 +183,57 @@ class GMDGMRApp:
         self.freq = 60.0  # Hz
 
     def set_unit(self, u):
+        """Sets the default unit for all incoming spatial measurements.
+
+        Args:
+            u (str): The unit to use ('m', 'ft', 'inch', 'cm', 'mm').
+
+        Returns:
+            str: A confirmation message.
+        """
         if u in UNIT_CONVERSIONS:
             self.unit = u
         return f"Units set to {u}"
 
     def set_scale(self, sx, sy):
+        """Sets the UI canvas scaling factors (for visualization).
+
+        Args:
+            sx (float): The scale factor for the x-axis.
+            sy (float): The scale factor for the y-axis.
+
+        Returns:
+            str: A confirmation message.
+        """
         self.scale_x = float(sx)
         self.scale_y = float(sy)
         return "Scales updated"
 
     def set_gmr(self, bundle, val):
+        """Sets the self GMR (r') for conductors of a given phase/bundle.
+
+        Args:
+            bundle (str): The bundle label ('A', 'B', or 'C').
+            val (float): The numerical value of the self GMR in the current units.
+
+        Returns:
+            str: A confirmation message.
+        """
         self.r_self[bundle] = float(val) * UNIT_CONVERSIONS[self.unit]
         return f"Set GMR for {bundle} = {val} {self.unit}"
 
     def set_line_params(self, material, length, radius, freq):
+        """Sets the physical parameters of the transmission line.
+
+        Args:
+            material (str): The conductor material ("Copper", "Aluminum", etc.).
+            length (float): The total length of the line in kilometers.
+            radius (float): The physical radius of a single conductor in meters.
+            freq (float): The system frequency in Hertz.
+
+        Returns:
+            str: A confirmation message.
+        """
         self.material = material
         self.length = float(length)
         self.conductor_radius = float(radius)
@@ -76,20 +241,58 @@ class GMDGMRApp:
         return "Parameters updated"
 
     def add_point(self, x, y, bundle):
+        """Adds a conductor's coordinate to a specific bundle/phase.
+
+        Args:
+            x (float): The x-coordinate of the conductor in the current units.
+            y (float): The y-coordinate of the conductor in the current units.
+            bundle (str): The bundle label to add the point to ('A', 'B', or 'C').
+
+        Returns:
+            str: "ok" on success.
+        """
         x_m = float(x) * UNIT_CONVERSIONS[self.unit]
         y_m = float(y) * UNIT_CONVERSIONS[self.unit]
         self.bundles[bundle].append((x_m, y_m))
         return "ok"
 
     def clear_bundle(self, bundle):
+        """Clears all conductor points from a single bundle.
+
+        Args:
+            bundle (str): The bundle label to clear ('A', 'B', or 'C').
+
+        Returns:
+            str: A confirmation message.
+        """
         self.bundles[bundle] = []
         return f"Cleared {bundle}"
 
     def clear_all(self):
+        """Clears all conductor points from all bundles."""
         self.bundles = {"A": [], "B": [], "C": []}
         return "All cleared"
 
     def compute_results(self):
+        """Performs all major calculations for the defined transmission line.
+
+        Calculates GMR for each bundle, GMD between each pair of bundles,
+        and the R, L, C line parameters based on the stored configuration.
+
+        Returns:
+            dict: A dictionary containing the results, structured as:
+            {
+                "gmr": [{"label": "A", "value": 0.01, "count": 1}, ...],
+                "gmd": [{"pair": "A-B", "value": 1.0}, ...],
+                "params": {
+                    "R_total": ...,
+                    "L_total": ... (mH),
+                    "C_total": ... (µF),
+                    "XL": ...,
+                    "XC": ...
+                }
+            }
+        """
         results = {"gmr": [], "gmd": [], "params": {}}
         gmr_values = {}
         
@@ -135,8 +338,11 @@ class GMDGMRApp:
             
             # Capacitance (F/km and F total)
             if len(gmr_values) >= 2:
-                r_equiv = self.conductor_radius * (n_conductors ** 0.5) if n_conductors > 0 else self.conductor_radius
-                C_per_km = (2 * np.pi * 8.854e-12 * 1000) / np.log(avg_gmd / r_equiv)  # F/km
+                # For capacitance, we use the actual conductor radius, not GMR.
+                # An equivalent radius for the bundle is needed.
+                # This is a simplification; a more precise method would involve potential coefficients.
+                r_bundle_equiv = (n_conductors * self.conductor_radius * (geometric_mean([distance(p1,p2) for p1,p2 in combinations(self.bundles[list(gmr_values.keys())[0]], 2)]) if n_conductors > 1 else 1)**(n_conductors-1))**(1/n_conductors) if n_conductors > 1 else self.conductor_radius
+                C_per_km = (2 * np.pi * 8.854e-12 * 1000) / np.log(avg_gmd / r_bundle_equiv) # F/km
                 C_total = C_per_km * self.length
             else:
                 C_per_km = 0
@@ -159,7 +365,6 @@ class GMDGMRApp:
             }
         
         return results
-
 # ---------- Modern Windows-Style UI ----------
 html = """
 <!DOCTYPE html>
@@ -804,7 +1009,379 @@ let activeBundle = 'A';
 let scaleX = 40, scaleY = 40;
 const origin = {x: 80, y: canvas.height - 80};
 
-// Set active bundle
+// ===== Snap & Preview System =====
+const SNAP_RADIUS = 15;
+const SNAP_COLOR = "#FFB900";
+let snapPoint = null;
+let allPoints = [];
+let lastPlacedPoint = null;
+let mousePos = {x: 0, y: 0};
+let shiftKeyPressed = false;
+
+// Track keyboard state
+let inputDialog = null;
+
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Shift') shiftKeyPressed = true;
+  
+  // TAB to open input dialog for direct length input
+  if (e.key === 'Tab' && lastPlacedPoint) {
+    e.preventDefault();
+    openLengthInputDialog();
+  }
+  
+  // ESC key to clear pointer and restart
+  if (e.key === 'Escape') {
+    lastPlacedPoint = null;
+    snapPoint = null;
+    mousePos = {x: 0, y: 0};
+    redraw();
+    
+    const display = document.getElementById('coordDisplay');
+    display.textContent = 'Pointer cleared • Ready for new bundle';
+    display.style.background = 'rgba(16, 124, 16, 0.9)';
+    display.style.opacity = '1';
+    
+    setTimeout(() => {
+      display.style.opacity = '0';
+    }, 2000);
+  }
+});
+
+window.addEventListener('keyup', (e) => {
+  if (e.key === 'Shift') shiftKeyPressed = false;
+});
+
+function openLengthInputDialog() {
+  if (inputDialog) return; // Prevent multiple dialogs
+  
+  // Create overlay
+  const overlay = document.createElement('div');
+  overlay.id = 'input-overlay';
+  overlay.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  `;
+  
+  // Create dialog
+  const dialog = document.createElement('div');
+  dialog.style.cssText = `
+    background: white;
+    border-radius: 8px;
+    padding: 24px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    min-width: 300px;
+    font-family: Inter, sans-serif;
+  `;
+  
+  dialog.innerHTML = `
+    <div style="margin-bottom: 16px;">
+      <h3 style="font-size: 16px; font-weight: 600; color: #1f1f1f; margin-bottom: 8px;">Enter Line Parameters</h3>
+    </div>
+    
+    <div style="margin-bottom: 16px;">
+      <label style="display: block; font-size: 13px; font-weight: 500; color: #1f1f1f; margin-bottom: 6px;">Length</label>
+      <input 
+        id="length-input" 
+        type="number" 
+        step="0.001" 
+        placeholder="Enter distance"
+        style="
+          width: 100%;
+          padding: 8px 10px;
+          border: 1px solid #e1dfdd;
+          border-radius: 4px;
+          font-size: 13px;
+          font-family: Consolas, Monaco, monospace;
+          box-sizing: border-box;
+        "
+      >
+    </div>
+    
+    <div style="margin-bottom: 16px;">
+      <label style="display: block; font-size: 13px; font-weight: 500; color: #1f1f1f; margin-bottom: 6px;">Angle (degrees)</label>
+      <input 
+        id="angle-input" 
+        type="number" 
+        step="0.1" 
+        value="0"
+        min="0"
+        max="360"
+        placeholder="0 to 360"
+        style="
+          width: 100%;
+          padding: 8px 10px;
+          border: 1px solid #e1dfdd;
+          border-radius: 4px;
+          font-size: 13px;
+          font-family: Consolas, Monaco, monospace;
+          box-sizing: border-box;
+        "
+      >
+      <p style="font-size: 11px; color: #605e5c; margin: 6px 0 0 0;">0° = Right, 90° = Up, 180° = Left, 270° = Down</p>
+    </div>
+    
+    <div style="display: flex; gap: 10px;">
+      <button id="confirm-btn" style="
+        flex: 1;
+        padding: 8px 16px;
+        background: #0078d4;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      ">Place Point</button>
+      <button id="cancel-btn" style="
+        flex: 1;
+        padding: 8px 16px;
+        background: #fafafa;
+        color: #1f1f1f;
+        border: 1px solid #e1dfdd;
+        border-radius: 4px;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      ">Cancel</button>
+    </div>
+  `;
+  
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+  
+  const lengthInput = document.getElementById('length-input');
+  const angleInput = document.getElementById('angle-input');
+  const confirmBtn = document.getElementById('confirm-btn');
+  const cancelBtn = document.getElementById('cancel-btn');
+  
+  // Calculate angle based on current mouse position
+  const dx = mousePos.x - lastPlacedPoint.x;
+  const dy = lastPlacedPoint.y - mousePos.y; // Flip Y for standard angle measurement
+  const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+  const normalizedAngle = angle < 0 ? angle + 360 : angle;
+  angleInput.value = normalizedAngle.toFixed(1);
+  
+  lengthInput.focus();
+  inputDialog = overlay;
+  
+  // Hover effects
+  confirmBtn.addEventListener('mouseover', () => {
+    confirmBtn.style.background = '#106ebe';
+  });
+  confirmBtn.addEventListener('mouseout', () => {
+    confirmBtn.style.background = '#0078d4';
+  });
+  
+  cancelBtn.addEventListener('mouseover', () => {
+    cancelBtn.style.background = '#f5f5f5';
+  });
+  cancelBtn.addEventListener('mouseout', () => {
+    cancelBtn.style.background = '#fafafa';
+  });
+  
+  function closeDialog() {
+    if (inputDialog) {
+      inputDialog.remove();
+      inputDialog = null;
+    }
+  }
+  
+  function placePointWithLength() {
+    const length = parseFloat(lengthInput.value);
+    const angle = parseFloat(angleInput.value);
+    
+    if (!length || length <= 0) {
+      alert('Please enter a valid positive length');
+      return;
+    }
+    
+    if (isNaN(angle) || angle < 0 || angle > 360) {
+      alert('Please enter a valid angle (0-360)');
+      return;
+    }
+    
+    // Convert angle to radians (standard math convention: 0° = right)
+    const radians = (angle * Math.PI) / 180;
+    
+    // Calculate new point using angle and length
+    const newX = lastPlacedPoint.x + (length * scaleX * Math.cos(radians));
+    const newY = lastPlacedPoint.y - (length * scaleY * Math.sin(radians)); // Flip Y
+    
+    // Convert to coordinates
+    const coordX = ((newX - origin.x) / scaleX).toFixed(3);
+    const coordY = ((origin.y - newY) / scaleY).toFixed(3);
+    
+    // Place the point
+    (async () => {
+      await pywebview.api.add_point(coordX, coordY, activeBundle);
+      bundles[activeBundle].push([parseFloat(coordX), parseFloat(coordY)]);
+      
+      lastPlacedPoint = {x: newX, y: newY};
+      
+      animatePointPlacement(newX, newY, colors[activeBundle]);
+      updateAllPoints();
+      redraw();
+      await updateResults();
+    })();
+    
+    closeDialog();
+  }
+  
+  confirmBtn.addEventListener('click', placePointWithLength);
+  cancelBtn.addEventListener('click', closeDialog);
+  
+  // Enter key to confirm
+  lengthInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+      placePointWithLength();
+    }
+  });
+  
+  // Escape to cancel
+  lengthInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closeDialog();
+    }
+  });
+}
+
+function updateAllPoints() {
+  allPoints = [];
+  for (let bundle in bundles) {
+    bundles[bundle].forEach(([x, y], i) => {
+      const canvasX = origin.x + x * scaleX;
+      const canvasY = origin.y - y * scaleY;
+      allPoints.push({
+        x: canvasX,
+        y: canvasY,
+        bundle: bundle,
+        index: i,
+        coordX: x,
+        coordY: y
+      });
+    });
+  }
+}
+
+function findSnapPoint(mouseX, mouseY) {
+  let nearest = null;
+  let minDist = SNAP_RADIUS;
+  
+  for (let p of allPoints) {
+    const dx = p.x - mouseX;
+    const dy = p.y - mouseY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    
+    if (dist < minDist) {
+      minDist = dist;
+      nearest = p;
+    }
+  }
+  
+  return nearest;
+}
+
+function getConstrainedPoint(currentX, currentY) {
+  if (!shiftKeyPressed || !lastPlacedPoint) {
+    return {x: currentX, y: currentY, type: 'free'};
+  }
+  
+  const dx = currentX - lastPlacedPoint.x;
+  const dy = currentY - lastPlacedPoint.y;
+  const absDx = Math.abs(dx);
+  const absDy = Math.abs(dy);
+  
+  // If closer to horizontal, constrain to Y
+  if (absDx > absDy) {
+    return {x: currentX, y: lastPlacedPoint.y, type: 'horizontal'};
+  } else {
+    return {x: lastPlacedPoint.x, y: currentY, type: 'vertical'};
+  }
+}
+
+function drawSnapIndicator() {
+  if (!snapPoint) return;
+  
+  ctx.beginPath();
+  ctx.arc(snapPoint.x, snapPoint.y, 12, 0, 2 * Math.PI);
+  ctx.strokeStyle = SNAP_COLOR;
+  ctx.lineWidth = 2.5;
+  ctx.globalAlpha = 0.8;
+  ctx.stroke();
+  
+  ctx.beginPath();
+  ctx.arc(snapPoint.x, snapPoint.y, 6, 0, 2 * Math.PI);
+  ctx.fillStyle = SNAP_COLOR;
+  ctx.globalAlpha = 0.3;
+  ctx.fill();
+  
+  ctx.globalAlpha = 1;
+}
+
+function drawPreviewLine() {
+  if (!lastPlacedPoint) return;
+  
+  const constrainedPos = getConstrainedPoint(mousePos.x, mousePos.y);
+  const targetX = constrainedPos.x;
+  const targetY = constrainedPos.y;
+  
+  // Draw preview line
+  ctx.beginPath();
+  ctx.moveTo(lastPlacedPoint.x, lastPlacedPoint.y);
+  ctx.lineTo(targetX, targetY);
+  ctx.strokeStyle = colors[activeBundle];
+  ctx.lineWidth = 2;
+  ctx.setLineDash([5, 5]);
+  ctx.globalAlpha = 0.6;
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  ctx.setLineDash([]);
+  
+  // Calculate distance
+  const dx = targetX - lastPlacedPoint.x;
+  const dy = targetY - lastPlacedPoint.y;
+  const canvasDistPx = Math.sqrt(dx * dx + dy * dy);
+  const canvasDistUnits = canvasDistPx / scaleX;
+  
+  // Draw constraint indicator if shift pressed
+  if (shiftKeyPressed) {
+    if (constrainedPos.type === 'horizontal') {
+      ctx.fillStyle = colors[activeBundle];
+      ctx.font = 'bold 12px Inter, sans-serif';
+      ctx.fillText('HORIZONTAL', targetX + 10, targetY - 15);
+    } else {
+      ctx.fillStyle = colors[activeBundle];
+      ctx.font = 'bold 12px Inter, sans-serif';
+      ctx.fillText('VERTICAL', targetX + 10, targetY - 15);
+    }
+  }
+  
+  // Draw distance label
+  const midX = (lastPlacedPoint.x + targetX) / 2;
+  const midY = (lastPlacedPoint.y + targetY) / 2;
+  
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
+  ctx.fillRect(midX - 35, midY - 25, 70, 24);
+  
+  ctx.fillStyle = colors[activeBundle];
+  ctx.font = 'bold 12px Consolas, Monaco, monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(canvasDistUnits.toFixed(3), midX, midY - 8);
+  ctx.textAlign = 'left';
+}
+
+// ===== Bundle Management =====
 function setActiveBundle(bundle) {
   activeBundle = bundle;
   document.querySelectorAll('.bundle-btn').forEach(btn => {
@@ -812,12 +1389,11 @@ function setActiveBundle(bundle) {
   });
 }
 
-// Draw grid with modern styling
+// ===== Drawing Functions =====
 function drawGrid() {
   ctx.strokeStyle = "#f5f5f5";
   ctx.lineWidth = 1;
   
-  // Grid lines
   for (let x = 0; x < canvas.width; x += scaleX) {
     ctx.beginPath();
     ctx.moveTo(x, 0);
@@ -831,7 +1407,6 @@ function drawGrid() {
     ctx.stroke();
   }
   
-  // Axes with shadow
   ctx.strokeStyle = "#424242";
   ctx.lineWidth = 2;
   ctx.shadowColor = "rgba(0,0,0,0.1)";
@@ -849,58 +1424,59 @@ function drawGrid() {
   
   ctx.shadowBlur = 0;
   
-  // Origin label
   ctx.fillStyle = "#424242";
   ctx.font = "600 12px Inter, sans-serif";
   ctx.fillText("(0, 0)", origin.x + 8, origin.y - 8);
 }
 
-// Draw distance lines between points in a bundle
 function drawBundleConnections(points, color) {
   if (points.length < 2) return;
   
   ctx.strokeStyle = color;
-  ctx.lineWidth = 1.5;
-  ctx.setLineDash([4, 4]);
-  ctx.globalAlpha = 0.4;
+  ctx.lineWidth = 2;
+  ctx.globalAlpha = 1;
   
-  // Draw all connections
-  for (let i = 0; i < points.length; i++) {
-    for (let j = i + 1; j < points.length; j++) {
-      const [x1, y1] = points[i];
-      const [x2, y2] = points[j];
-      const cx1 = origin.x + x1 * scaleX;
-      const cy1 = origin.y - y1 * scaleY;
-      const cx2 = origin.x + x2 * scaleX;
-      const cy2 = origin.y - y2 * scaleY;
-      
-      ctx.beginPath();
-      ctx.moveTo(cx1, cy1);
-      ctx.lineTo(cx2, cy2);
-      ctx.stroke();
-      
-      // Draw distance label at midpoint
-      const mx = (cx1 + cx2) / 2;
-      const my = (cy1 + cy2) / 2;
-      const dist = Math.sqrt((x2-x1)**2 + (y2-y1)**2);
-      
-      ctx.globalAlpha = 0.7;
-      ctx.fillStyle = color;
-      ctx.font = "600 10px Inter, sans-serif";
-      ctx.fillText(dist.toFixed(3), mx + 4, my - 4);
-      ctx.globalAlpha = 1;
-    }
+  // Draw actual line connections
+  for (let i = 0; i < points.length - 1; i++) {
+    const [x1, y1] = points[i];
+    const [x2, y2] = points[i + 1];
+    const cx1 = origin.x + x1 * scaleX;
+    const cy1 = origin.y - y1 * scaleY;
+    const cx2 = origin.x + x2 * scaleX;
+    const cy2 = origin.y - y2 * scaleY;
+    
+    ctx.beginPath();
+    ctx.moveTo(cx1, cy1);
+    ctx.lineTo(cx2, cy2);
+    ctx.stroke();
+    
+    // Draw segment distance
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    
+    const mx = (cx1 + cx2) / 2;
+    const my = (cy1 + cy2) / 2;
+    
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+    ctx.fillRect(mx - 30, my - 20, 60, 20);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(mx - 30, my - 20, 60, 20);
+    
+    ctx.fillStyle = color;
+    ctx.font = 'bold 11px Consolas, Monaco, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(dist.toFixed(3), mx, my - 7);
+    ctx.textAlign = 'left';
   }
   
-  ctx.setLineDash([]);
   ctx.globalAlpha = 1;
 }
 
-// Draw enclosing circle for bundle
-function drawBundleCircle(points, color) {
-  if (points.length < 2) return;
+function getBundleCenter(points) {
+  if (points.length === 0) return null;
   
-  // Calculate centroid
   let cx = 0, cy = 0;
   points.forEach(([x, y]) => {
     cx += x;
@@ -909,7 +1485,20 @@ function drawBundleCircle(points, color) {
   cx /= points.length;
   cy /= points.length;
   
-  // Find max radius
+  return {x: cx, y: cy};
+}
+
+function drawBundleCircle(points, color) {
+  if (points.length < 2) return;
+  
+  let cx = 0, cy = 0;
+  points.forEach(([x, y]) => {
+    cx += x;
+    cy += y;
+  });
+  cx /= points.length;
+  cy /= points.length;
+  
   let maxR = 0;
   points.forEach(([x, y]) => {
     const dist = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2);
@@ -918,9 +1507,8 @@ function drawBundleCircle(points, color) {
   
   const centerX = origin.x + cx * scaleX;
   const centerY = origin.y - cy * scaleY;
-  const radius = maxR * scaleX * 1.2; // 20% padding
+  const radius = maxR * scaleX * 1.2;
   
-  // Draw dashed circle
   ctx.strokeStyle = color;
   ctx.lineWidth = 2;
   ctx.setLineDash([8, 4]);
@@ -934,32 +1522,90 @@ function drawBundleCircle(points, color) {
   ctx.globalAlpha = 1;
 }
 
-// Main redraw function
-function redraw() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  drawGrid();
+function drawGMDLines() {
+  // Get all bundles with points
+  const bundlesWithPoints = Object.keys(bundles).filter(b => bundles[b].length > 0);
   
-  // Draw connections and circles for each bundle
-  for (let b in bundles) {
-    if (bundles[b].length > 0) {
-      drawBundleConnections(bundles[b], colors[b]);
-      drawBundleCircle(bundles[b], colors[b]);
+  if (bundlesWithPoints.length < 2) return;
+  
+  // GMD pairs to display
+  const pairs = [
+    ['A', 'B'],
+    ['B', 'C'],
+    ['A', 'C']
+  ];
+  
+  pairs.forEach(([b1, b2]) => {
+    if (bundles[b1].length > 0 && bundles[b2].length > 0) {
+      // Get bundle centers
+      const c1 = getBundleCenter(bundles[b1]);
+      const c2 = getBundleCenter(bundles[b2]);
+      
+      const x1 = origin.x + c1.x * scaleX;
+      const y1 = origin.y - c1.y * scaleY;
+      const x2 = origin.x + c2.x * scaleX;
+      const y2 = origin.y - c2.y * scaleY;
+      
+      // Calculate GMD (geometric mean distance between bundles)
+      const dx = c2.x - c1.x;
+      const dy = c2.y - c1.y;
+      const gmd = Math.sqrt(dx * dx + dy * dy);
+      
+      const mx = (x1 + x2) / 2;
+      const my = (y1 + y2) / 2;
+      
+      // Draw dashed line
+      ctx.strokeStyle = '#FF6B35';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([5, 5]);
+      ctx.globalAlpha = 0.8;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.setLineDash([]);
+      
+      // Draw bundle center markers
+      ctx.fillStyle = '#FF6B35';
+      ctx.globalAlpha = 0.6;
+      ctx.beginPath();
+      ctx.arc(x1, y1, 5, 0, 2 * Math.PI);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(x2, y2, 5, 0, 2 * Math.PI);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      
+      // Draw GMD label box
+      ctx.fillStyle = '#FFF5F0';
+      ctx.fillRect(mx - 65, my - 20, 130, 28);
+      
+      ctx.strokeStyle = '#FF6B35';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(mx - 65, my - 20, 130, 28);
+      
+      // GMD label text
+      ctx.fillStyle = '#FF6B35';
+      ctx.font = 'bold 13px Consolas, Monaco, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(`GMD ${b1}-${b2}: ${gmd.toFixed(4)}`, mx, my + 3);
+      ctx.textAlign = 'left';
     }
-  }
-  
-  // Draw points on top
+  });
+}
+
+function drawPoints() {
   for (let b in bundles) {
     ctx.fillStyle = colors[b];
     bundles[b].forEach(([x, y], i) => {
       const cx = origin.x + x * scaleX;
       const cy = origin.y - y * scaleY;
       
-      // Point shadow
       ctx.shadowColor = "rgba(0,0,0,0.25)";
       ctx.shadowBlur = 8;
       ctx.shadowOffsetY = 2;
       
-      // Draw point
       ctx.beginPath();
       ctx.arc(cx, cy, 8, 0, 2 * Math.PI);
       ctx.fill();
@@ -967,16 +1613,14 @@ function redraw() {
       ctx.shadowBlur = 0;
       ctx.shadowOffsetY = 0;
       
-      // Inner highlight
       ctx.fillStyle = "rgba(255,255,255,0.4)";
       ctx.beginPath();
       ctx.arc(cx - 1, cy - 1, 3, 0, 2 * Math.PI);
       ctx.fill();
       
-      // Label with background
       ctx.fillStyle = "rgba(255,255,255,0.95)";
       const label = b + (i + 1);
-      ctx.font = "600 11px Inter, sans-serif";
+      ctx.font = "bold 11px Inter, sans-serif";
       const metrics = ctx.measureText(label);
       const labelWidth = metrics.width + 8;
       
@@ -987,55 +1631,27 @@ function redraw() {
       
       ctx.fillStyle = colors[b];
       ctx.fillText(label, cx + 16, cy - 4);
-      ctx.fillStyle = colors[b];
     });
   }
 }
 
-// Canvas click handler
-canvas.addEventListener('click', async (e) => {
-  const rect = canvas.getBoundingClientRect();
-  const scaleFactorX = canvas.width / rect.width;
-  const scaleFactorY = canvas.height / rect.height;
+function redraw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawGrid();
   
-  const mx = (e.clientX - rect.left) * scaleFactorX;
-  const my = (e.clientY - rect.top) * scaleFactorY;
+  for (let b in bundles) {
+    if (bundles[b].length > 0) {
+      drawBundleCircle(bundles[b], colors[b]);
+      drawBundleConnections(bundles[b], colors[b]);
+    }
+  }
   
-  const x = ((mx - origin.x) / scaleX).toFixed(3);
-  const y = ((origin.y - my) / scaleY).toFixed(3);
-  
-  await pywebview.api.add_point(x, y, activeBundle);
-  bundles[activeBundle].push([parseFloat(x), parseFloat(y)]);
-  
-  // Animate point placement
-  animatePointPlacement(mx, my, colors[activeBundle]);
-  
-  redraw();
-  await updateResults();
-});
+  drawPoints();
+  drawSnapIndicator();
+  drawPreviewLine();
+}
 
-// Mouse move for coordinate display
-canvas.addEventListener('mousemove', (e) => {
-  const rect = canvas.getBoundingClientRect();
-  const scaleFactorX = canvas.width / rect.width;
-  const scaleFactorY = canvas.height / rect.height;
-  
-  const mx = (e.clientX - rect.left) * scaleFactorX;
-  const my = (e.clientY - rect.top) * scaleFactorY;
-  
-  const x = ((mx - origin.x) / scaleX).toFixed(3);
-  const y = ((origin.y - my) / scaleY).toFixed(3);
-  
-  const display = document.getElementById('coordDisplay');
-  display.textContent = `x: ${x}, y: ${y}`;
-  display.style.opacity = '1';
-});
-
-canvas.addEventListener('mouseleave', () => {
-  document.getElementById('coordDisplay').style.opacity = '0';
-});
-
-// Animate point placement
+// ===== Animation =====
 function animatePointPlacement(x, y, color) {
   let r = 0;
   const animate = () => {
@@ -1059,7 +1675,97 @@ function animatePointPlacement(x, y, color) {
   animate();
 }
 
-// Update results display
+// ===== Canvas Events =====
+canvas.addEventListener('mousemove', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const scaleFactorX = canvas.width / rect.width;
+  const scaleFactorY = canvas.height / rect.height;
+  
+  const mx = (e.clientX - rect.left) * scaleFactorX;
+  const my = (e.clientY - rect.top) * scaleFactorY;
+  
+  mousePos = {x: mx, y: my};
+  
+  snapPoint = findSnapPoint(mx, my);
+  
+  const x = ((mx - origin.x) / scaleX).toFixed(3);
+  const y = ((origin.y - my) / scaleY).toFixed(3);
+  
+  const display = document.getElementById('coordDisplay');
+  
+  if (snapPoint) {
+    display.textContent = `SNAP: ${snapPoint.bundle}${snapPoint.index + 1} (${snapPoint.coordX.toFixed(3)}, ${snapPoint.coordY.toFixed(3)})`;
+    display.style.background = 'rgba(255, 185, 0, 0.9)';
+  } else if (lastPlacedPoint && shiftKeyPressed) {
+    display.textContent = `SHIFT: Constrained placement | x: ${x}, y: ${y}`;
+    display.style.background = 'rgba(0, 120, 212, 0.9)';
+  } else {
+    display.textContent = `x: ${x}, y: ${y}`;
+    display.style.background = 'rgba(0, 0, 0, 0.85)';
+  }
+  display.style.opacity = '1';
+  
+  redraw();
+});
+
+canvas.addEventListener('click', async (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const scaleFactorX = canvas.width / rect.width;
+  const scaleFactorY = canvas.height / rect.height;
+  
+  const mx = (e.clientX - rect.left) * scaleFactorX;
+  const my = (e.clientY - rect.top) * scaleFactorY;
+  
+  let finalPos;
+  let x, y;
+  
+  if (snapPoint) {
+    x = snapPoint.coordX.toFixed(3);
+    y = snapPoint.coordY.toFixed(3);
+    finalPos = {x: snapPoint.x, y: snapPoint.y};
+  } else {
+    const constrainedPos = getConstrainedPoint(mx, my);
+    x = ((constrainedPos.x - origin.x) / scaleX).toFixed(3);
+    y = ((origin.y - constrainedPos.y) / scaleY).toFixed(3);
+    finalPos = {x: constrainedPos.x, y: constrainedPos.y};
+  }
+  
+  await pywebview.api.add_point(x, y, activeBundle);
+  bundles[activeBundle].push([parseFloat(x), parseFloat(y)]);
+  
+  lastPlacedPoint = finalPos;
+  
+  animatePointPlacement(finalPos.x, finalPos.y, colors[activeBundle]);
+  updateAllPoints();
+  redraw();
+  await updateResults();
+});
+
+canvas.addEventListener('mouseleave', () => {
+  snapPoint = null;
+  document.getElementById('coordDisplay').style.opacity = '0';
+});
+
+// ESC key to clear pointer and restart
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    lastPlacedPoint = null;
+    snapPoint = null;
+    mousePos = {x: 0, y: 0};
+    redraw();
+    
+    const display = document.getElementById('coordDisplay');
+    display.textContent = 'Pointer cleared • Ready for new bundle';
+    display.style.background = 'rgba(16, 124, 16, 0.9)';
+    display.style.opacity = '1';
+    
+    setTimeout(() => {
+      display.style.opacity = '0';
+    }, 2000);
+  }
+});
+
+// ===== Results Display =====
 async function updateResults() {
   const results = await pywebview.api.compute_results();
   const container = document.getElementById('results');
@@ -1071,14 +1777,13 @@ async function updateResults() {
           <path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/>
           <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm0-2a6 6 0 100-12 6 6 0 000 12z"/>
         </svg>
-        <p class="empty-text">Click on the canvas to place conductor points and see calculations</p>
+        <p class="empty-text">Click on the canvas to place conductor points • Hold SHIFT for 90° constraints</p>
       </div>`;
     return;
   }
   
   let html = '';
   
-  // GMR Results
   if (results.gmr.length > 0) {
     html += '<div class="result-card"><div class="result-card-title">Geometric Mean Radius (GMR)</div>';
     results.gmr.forEach(r => {
@@ -1094,7 +1799,6 @@ async function updateResults() {
     html += '</div>';
   }
   
-  // GMD Results
   if (results.gmd.length > 0) {
     html += '<div class="result-card"><div class="result-card-title">Geometric Mean Distance (GMD)</div>';
     results.gmd.forEach(r => {
@@ -1107,7 +1811,6 @@ async function updateResults() {
     html += '</div>';
   }
   
-  // Line Parameters
   if (results.params && Object.keys(results.params).length > 0) {
     const p = results.params;
     
@@ -1159,7 +1862,7 @@ async function updateResults() {
   container.innerHTML = html;
 }
 
-// Control functions
+// ===== Control Functions =====
 async function setGMRs() {
   const A = document.getElementById('gA').value;
   const B = document.getElementById('gB').value;
@@ -1181,6 +1884,7 @@ async function updateScale() {
   await pywebview.api.set_scale(sx, sy);
   scaleX = parseFloat(sx);
   scaleY = parseFloat(sy);
+  updateAllPoints();
   redraw();
 }
 
@@ -1197,6 +1901,8 @@ async function updateLineParams() {
 async function clearCurrent() {
   await pywebview.api.clear_bundle(activeBundle);
   bundles[activeBundle] = [];
+  lastPlacedPoint = null;
+  updateAllPoints();
   redraw();
   await updateResults();
 }
@@ -1204,11 +1910,13 @@ async function clearCurrent() {
 async function clearAll() {
   await pywebview.api.clear_all();
   bundles = {A: [], B: [], C: []};
+  lastPlacedPoint = null;
+  updateAllPoints();
   redraw();
   await updateResults();
 }
 
-// Initialize
+// ===== Initialize =====
 redraw();
 </script>
 </body>
