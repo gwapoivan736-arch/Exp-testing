@@ -1280,15 +1280,15 @@ canvas {
       
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label">GMR A</label>
+          <label class="form-label">Radius A</label>
           <input id="gA" type="number" step="0.001" value="0.01" class="form-control">
         </div>
         <div class="form-group">
-          <label class="form-label">GMR B</label>
+          <label class="form-label">Radius B</label>
           <input id="gB" type="number" step="0.001" value="0.01" class="form-control">
         </div>
         <div class="form-group">
-          <label class="form-label">GMR C</label>
+          <label class="form-label">Radius C</label>
           <input id="gC" type="number" step="0.001" value="0.01" class="form-control">
         </div>
       </div>
