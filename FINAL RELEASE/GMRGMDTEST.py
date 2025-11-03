@@ -4,7 +4,7 @@ from itertools import combinations, product
 import google.generativeai as genai
 import json
 
-GEMINI_API_KEY = "AIzaSyDgJcTZHERGt6URVGdTwd8twOCaumUtX4g"
+GEMINI_API_KEY = ""
 
 """
 Transmission Line Parameter Calculator Backend
@@ -2509,7 +2509,7 @@ canvas.addEventListener('mousemove', (e) => {
   }
   
   if (!foundGMRHover) {
-    hoveredGMR = null;
+    hoveredGMR = null;  
     canvas.style.cursor = 'crosshair';
   }
   
