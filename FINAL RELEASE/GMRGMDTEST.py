@@ -4,7 +4,7 @@ from itertools import combinations, product
 import google.generativeai as genai
 import json
 
-GEMINI_API_KEY = "AIzaSyDgJcTZHERGt6URVGdTwd8twOCaumUtX4g"
+GEMINI_API_KEY = ""
 
 """
 Transmission Line Parameter Calculator Backend
@@ -1280,15 +1280,15 @@ canvas {
       
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label">GMR A</label>
+          <label class="form-label">Radius A</label>
           <input id="gA" type="number" step="0.001" value="0.01" class="form-control">
         </div>
         <div class="form-group">
-          <label class="form-label">GMR B</label>
+          <label class="form-label">Radius B</label>
           <input id="gB" type="number" step="0.001" value="0.01" class="form-control">
         </div>
         <div class="form-group">
-          <label class="form-label">GMR C</label>
+          <label class="form-label">Radius C</label>
           <input id="gC" type="number" step="0.001" value="0.01" class="form-control">
         </div>
       </div>
@@ -1435,13 +1435,8 @@ const SNAP_RADIUS = 15;
 const SNAP_COLOR = "#FFB900";
 let snapPoint = null;
 let allPoints = [];
+let gmrCircles = [];
 // GMR visualization state
-let hoveredGMR = null;
-const GMR_COLORS = {
-  A: 'rgba(216, 59, 1, 0.3)',
-  B: 'rgba(0, 120, 212, 0.3)',
-  C: 'rgba(16, 124, 16, 0.3)'
-};
 let lastPlacedPoint = null;
 let mousePos = {x: 0, y: 0};
 let shiftKeyPressed = false;
@@ -2146,28 +2141,32 @@ function drawGMRCircles() {
     const centerX = origin.x + center.x * scaleX;
     const centerY = origin.y - center.y * scaleY;
     
-    // Get GMR value from backend (stored in meters)
-    // We need to calculate the visual radius based on the GMR
-    const gmrMeters = (bundles[b].length === 1) 
-      ? parseFloat(document.getElementById(`g${b}`).value) * 0.7788 * UNIT_CONVERSIONS[document.getElementById('unit').value]
-      : null; // For bundles, GMR is calculated differently
-    
-    if (!gmrMeters && bundles[b].length === 1) continue;
-    
-    // For single conductors, use the GMR directly
-    // For bundled conductors, approximate radius as 80% of max distance from center
+    // Get GMR value and calculate visual radius
     let visualRadius;
+    let gmrMeters = null;
     
     if (bundles[b].length === 1) {
-      visualRadius = gmrMeters * scaleX * 1.5; // Scale for visibility
+      // For single conductors, use the input GMR value
+      const unitValue = parseFloat(document.getElementById(`g${b}`).value) || 0.01;
+      const unit = document.getElementById('unit').value;
+      const UNIT_CONVERSIONS = {
+        "m": 1.0,
+        "ft": 0.3048,
+        "inch": 0.0254,
+        "cm": 0.01,
+        "mm": 0.001
+      };
+      gmrMeters = unitValue * 0.7788 * UNIT_CONVERSIONS[unit];
+      visualRadius = gmrMeters * scaleX * 3; // Increased multiplier for better visibility
     } else {
-      // Calculate equivalent GMR radius for bundled conductors
+      // For bundled conductors, calculate based on bundle spread
       let maxDist = 0;
       bundles[b].forEach(([x, y]) => {
         const dist = Math.sqrt((x - center.x) ** 2 + (y - center.y) ** 2);
         maxDist = Math.max(maxDist, dist);
       });
-      visualRadius = maxDist * scaleX * 0.8;
+      visualRadius = maxDist * scaleX * 0.75;
+      gmrMeters = visualRadius / scaleX; // Approximate GMR
     }
     
     // Store for hover detection
@@ -2202,16 +2201,16 @@ function drawGMRCircles() {
     }
     
     // Main GMR circle
-    ctx.globalAlpha = isHovered ? 0.5 : 0.25;
+    ctx.globalAlpha = isHovered ? 0.4 : 0.2; // Reduced opacity
     ctx.fillStyle = colors[b];
     ctx.beginPath();
     ctx.arc(centerX, centerY, visualRadius, 0, 2 * Math.PI);
     ctx.fill();
     
     // GMR circle border
-    ctx.globalAlpha = isHovered ? 0.9 : 0.6;
+    ctx.globalAlpha = isHovered ? 0.8 : 0.5; // Reduced opacity
     ctx.strokeStyle = colors[b];
-    ctx.lineWidth = isHovered ? 3 : 2;
+    ctx.lineWidth = isHovered ? 3 : 1.5;
     ctx.setLineDash([8, 4]);
     ctx.beginPath();
     ctx.arc(centerX, centerY, visualRadius, 0, 2 * Math.PI);
@@ -2219,23 +2218,23 @@ function drawGMRCircles() {
     ctx.setLineDash([]);
     
     // Draw center marker
-    ctx.globalAlpha = isHovered ? 1 : 0.7;
+    ctx.globalAlpha = isHovered ? 1 : 0.6;
     ctx.fillStyle = colors[b];
     ctx.beginPath();
-    ctx.arc(centerX, centerY, isHovered ? 6 : 4, 0, 2 * Math.PI);
+    ctx.arc(centerX, centerY, isHovered ? 5 : 3, 0, 2 * Math.PI);
     ctx.fill();
     
     // White center dot
     ctx.fillStyle = 'white';
     ctx.beginPath();
-    ctx.arc(centerX, centerY, isHovered ? 3 : 2, 0, 2 * Math.PI);
+    ctx.arc(centerX, centerY, isHovered ? 2.5 : 1.5, 0, 2 * Math.PI);
     ctx.fill();
     
     // Draw GMR label (always visible, enhanced on hover)
     const labelY = centerY - visualRadius - (isHovered ? 25 : 15);
     
     // Label background
-    ctx.globalAlpha = isHovered ? 0.98 : 0.92;
+    ctx.globalAlpha = isHovered ? 0.98 : 0.85;
     ctx.fillStyle = 'white';
     const labelWidth = isHovered ? 110 : 90;
     const labelHeight = isHovered ? 26 : 22;
@@ -2481,43 +2480,43 @@ canvas.addEventListener('mousemove', (e) => {
     
     lastMousePos = {x: e.clientX, y: e.clientY};
     redraw();
-    return;  // Skip other calculations while panning
+    return;
   }
   
-  // Get mouse position in screen coordinates
   const screenX = (e.clientX - rect.left) * scaleFactorX;
   const screenY = (e.clientY - rect.top) * scaleFactorY;
   
-  // Convert to world coordinates
   const mx = (screenX - panOffset.x) / zoomLevel;
   const my = (screenY - panOffset.y) / zoomLevel;
   
   mousePos = {x: mx, y: my};
 
-    let foundHover = false;
-  for (let gmr of gmrCircles) {
-    const dx = mx - gmr.centerX;
-    const dy = my - gmr.centerY;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    
-    if (dist <= gmr.radius) {
-      hoveredGMR = gmr.bundle;
-      foundHover = true;
-      canvas.style.cursor = 'help';
-      break;
+  // ✅ Check GMR hover ONLY if gmrCircles is defined and has items
+  let foundGMRHover = false;
+  if (gmrCircles && gmrCircles.length > 0) {
+    for (let gmr of gmrCircles) {
+      const dx = mx - gmr.centerX;
+      const dy = my - gmr.centerY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      
+      if (dist <= gmr.radius) {
+        hoveredGMR = gmr.bundle;
+        foundGMRHover = true;
+        canvas.style.cursor = 'help';
+        break;
+      }
     }
   }
   
-  if (!foundHover) {
-    hoveredGMR = null;
+  if (!foundGMRHover) {
+    hoveredGMR = null;  
     canvas.style.cursor = 'crosshair';
   }
   
   snapPoint = findSnapPoint(mx, my);
   
-  // Calculate grid coordinates relative to origin
-  const x = ((mx - origin.x / zoomLevel) / (scaleX / zoomLevel)).toFixed(3);
-  const y = ((origin.y / zoomLevel - my) / (scaleY / zoomLevel)).toFixed(3);
+  const x = ((mx - origin.x) / scaleX).toFixed(3);
+  const y = ((origin.y - my) / scaleY).toFixed(3);
   
   const display = document.getElementById('coordDisplay');
   

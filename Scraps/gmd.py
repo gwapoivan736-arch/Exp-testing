@@ -1,9 +1,9 @@
 import math
-"."
 
+distances = [2,3,4]
 # calculate GMD (Geometric Mean Distance)
 if not distances or any(d <= 0 for d in distances):
-        raise ValueError("All distances must be positive and non-zero.") # Ensure all distances are positive and non-zero
+    raise ValueError("All distances must be positive and non-zero.") # Ensure all distances are positive and non-zero
 
     n = len(distances) # number of distances
     product = reduce(lambda x, y: x * y, distances) # product of all distances (d1*d2*...*dn)
@@ -11,5 +11,3 @@ if not distances or any(d <= 0 for d in distances):
     return gmd
 
 # calculate GMR (Geometric Mean Radius)
-
-#sakdlasdjlasdjalkdjadla
